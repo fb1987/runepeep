@@ -25,8 +25,21 @@ export type VisionResult = {
 
 export type ProgressCallback = (message: string, value: number) => void;
 
-const columns = 9;
-const rows = 4;
+export const RUNE_GRID_COLUMNS = 9;
+export const RUNE_GRID_ROWS = 5;
+
+export const RUNE_SLOT_LAYOUT: readonly { column: number; row: number }[] = [
+  ...Array.from({ length: 27 }, (_, index) => ({
+    column: index % RUNE_GRID_COLUMNS,
+    row: Math.floor(index / RUNE_GRID_COLUMNS),
+  })),
+  { column: 0, row: 3 },
+  { column: 1, row: 3 },
+  { column: 7, row: 3 },
+  { column: 8, row: 3 },
+  { column: 0, row: 4 },
+  { column: 8, row: 4 },
+];
 
 let workerPromise: ReturnType<typeof createDigitWorker> | null = null;
 
@@ -54,12 +67,12 @@ function loadImage(src: string) {
 }
 
 function getCenteredCrop(width: number, height: number) {
-  const aspect = columns / rows;
-  let cropWidth = width * 0.92;
+  const aspect = RUNE_GRID_COLUMNS / RUNE_GRID_ROWS;
+  let cropWidth = width * 0.88;
   let cropHeight = cropWidth / aspect;
 
-  if (cropHeight > height * 0.86) {
-    cropHeight = height * 0.86;
+  if (cropHeight > height * 0.88) {
+    cropHeight = height * 0.88;
     cropWidth = cropHeight * aspect;
   }
 
@@ -107,6 +120,182 @@ function imageVariance(data: Uint8ClampedArray) {
     mean,
     deviation: Math.sqrt(variance),
     brightRatio: brightPixels / pixels,
+  };
+}
+
+function createLuma(data: Uint8ClampedArray, width: number, height: number) {
+  const luma = new Uint8ClampedArray(width * height);
+
+  for (let index = 0; index < luma.length; index += 1) {
+    const sourceIndex = index * 4;
+    luma[index] = data[sourceIndex] * 0.299 + data[sourceIndex + 1] * 0.587 + data[sourceIndex + 2] * 0.114;
+  }
+
+  return luma;
+}
+
+function makeVerticalEdgeProjection(
+  luma: Uint8ClampedArray,
+  width: number,
+  height: number,
+  yStart: number,
+  yEnd: number,
+) {
+  const projection = new Float32Array(width);
+  const top = Math.max(1, Math.round(yStart));
+  const bottom = Math.min(height - 2, Math.round(yEnd));
+
+  for (let x = 1; x < width - 1; x += 1) {
+    let score = 0;
+
+    for (let y = top; y <= bottom; y += 1) {
+      score += Math.abs(luma[y * width + x + 1] - luma[y * width + x - 1]);
+    }
+
+    projection[x] = score / Math.max(1, bottom - top + 1);
+  }
+
+  return projection;
+}
+
+function makeHorizontalEdgeProjection(
+  luma: Uint8ClampedArray,
+  width: number,
+  height: number,
+  xStart: number,
+  xEnd: number,
+) {
+  const projection = new Float32Array(height);
+  const left = Math.max(1, Math.round(xStart));
+  const right = Math.min(width - 2, Math.round(xEnd));
+
+  for (let y = 1; y < height - 1; y += 1) {
+    let score = 0;
+
+    for (let x = left; x <= right; x += 1) {
+      score += Math.abs(luma[(y + 1) * width + x] - luma[(y - 1) * width + x]);
+    }
+
+    projection[y] = score / Math.max(1, right - left + 1);
+  }
+
+  return projection;
+}
+
+function localPeak(projection: Float32Array, position: number) {
+  const center = Math.round(position);
+  let peak = 0;
+
+  for (let index = Math.max(0, center - 3); index <= Math.min(projection.length - 1, center + 3); index += 1) {
+    peak = Math.max(peak, projection[index]);
+  }
+
+  return peak;
+}
+
+function searchRepeatedEdges(
+  projection: Float32Array,
+  slots: number,
+  startMin: number,
+  startMax: number,
+  pitchMin: number,
+  pitchMax: number,
+  endMax: number,
+) {
+  let best = {
+    start: 0,
+    pitch: 0,
+    score: 0,
+  };
+
+  for (let pitch = pitchMin; pitch <= pitchMax; pitch += 1) {
+    for (let start = startMin; start <= startMax; start += 2) {
+      if (start + slots * pitch > endMax) {
+        continue;
+      }
+
+      let score = 0;
+
+      for (let slot = 0; slot <= slots; slot += 1) {
+        score += localPeak(projection, start + slot * pitch);
+      }
+
+      for (let slot = 0; slot < slots; slot += 1) {
+        score += localPeak(projection, start + slot * pitch + pitch * 0.91) * 0.35;
+      }
+
+      const normalized = score / (slots + 1 + slots * 0.35);
+
+      if (normalized > best.score) {
+        best = { start, pitch, score: normalized };
+      }
+    }
+  }
+
+  return best;
+}
+
+function findRuneGridCrop(context: CanvasRenderingContext2D, width: number, height: number) {
+  const fallback = getCenteredCrop(width, height);
+  const imageData = context.getImageData(0, 0, width, height).data;
+  const luma = createLuma(imageData, width, height);
+  const verticalEdges = makeVerticalEdgeProjection(luma, width, height, height * 0.18, height * 0.6);
+  const horizontalEdges = makeHorizontalEdgeProjection(luma, width, height, width * 0.06, width * 0.94);
+  const xAxis = searchRepeatedEdges(
+    verticalEdges,
+    RUNE_GRID_COLUMNS,
+    width * 0.04,
+    width * 0.32,
+    width * 0.05,
+    width * 0.12,
+    width * 0.98,
+  );
+  const yAxis = searchRepeatedEdges(
+    horizontalEdges,
+    RUNE_GRID_ROWS,
+    height * 0.04,
+    height * 0.42,
+    height * 0.04,
+    height * 0.1,
+    height * 0.96,
+  );
+
+  if (xAxis.score < 10 || yAxis.score < 10) {
+    return fallback;
+  }
+
+  return {
+    x: xAxis.start,
+    y: yAxis.start,
+    width: xAxis.pitch * RUNE_GRID_COLUMNS,
+    height: yAxis.pitch * RUNE_GRID_ROWS,
+  };
+}
+
+function digitInkStats(data: Uint8ClampedArray) {
+  let brightDigitPixels = 0;
+  let veryBrightPixels = 0;
+  const pixels = data.length / 4;
+
+  for (let index = 0; index < data.length; index += 4) {
+    const red = data[index];
+    const green = data[index + 1];
+    const blue = data[index + 2];
+    const lightness = red * 0.299 + green * 0.587 + blue * 0.114;
+    const coolHighlight = green >= red * 0.86 && blue >= red * 0.78;
+
+    if (lightness > 146 && coolHighlight) {
+      brightDigitPixels += 1;
+    }
+
+    if (lightness > 188) {
+      veryBrightPixels += 1;
+    }
+  }
+
+  return {
+    brightRatio: brightDigitPixels / pixels,
+    veryBrightRatio: veryBrightPixels / pixels,
   };
 }
 
@@ -159,53 +348,37 @@ async function readDigits(canvas: HTMLCanvasElement) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function getVisualScore(
-  context: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-) {
-  const insetX = width * 0.18;
-  const insetY = height * 0.18;
-  const imageData = context.getImageData(x + insetX, y + insetY, width - insetX * 2, height - insetY * 2);
-  const stats = imageVariance(imageData.data);
-  return stats.deviation / 42 + stats.brightRatio * 1.4;
-}
-
 export async function analyzeRuneTab(imageSrc: string, onProgress?: ProgressCallback): Promise<VisionResult> {
   onProgress?.("Loading image", 0.05);
   const image = await loadImage(imageSrc);
   const { canvas, context } = drawImageToCanvas(image);
-  const crop = getCenteredCrop(canvas.width, canvas.height);
-  const cellWidth = crop.width / columns;
-  const cellHeight = crop.height / rows;
+  const crop = findRuneGridCrop(context, canvas.width, canvas.height);
+  const cellWidth = crop.width / RUNE_GRID_COLUMNS;
+  const cellHeight = crop.height / RUNE_GRID_ROWS;
   const reads: RuneRead[] = [];
 
   onProgress?.("Reading stack counts", 0.1);
 
   for (let index = 0; index < RUNE_NAMES.length; index += 1) {
-    const column = index % columns;
-    const row = Math.floor(index / columns);
+    const { column, row } = RUNE_SLOT_LAYOUT[index];
     const cellX = crop.x + column * cellWidth;
     const cellY = crop.y + row * cellHeight;
-    const visualScore = getVisualScore(context, cellX, cellY, cellWidth, cellHeight);
     const digitCrop = {
-      x: cellX + cellWidth * 0.42,
-      y: cellY + cellHeight * 0.56,
-      width: cellWidth * 0.52,
-      height: cellHeight * 0.36,
+      x: cellX + cellWidth * 0.5,
+      y: cellY + cellHeight * 0.58,
+      width: cellWidth * 0.46,
+      height: cellHeight * 0.34,
     };
-    const digitStats = imageVariance(
-      context.getImageData(digitCrop.x, digitCrop.y, digitCrop.width, digitCrop.height).data,
-    );
+    const digitImageData = context.getImageData(digitCrop.x, digitCrop.y, digitCrop.width, digitCrop.height);
+    const digitStats = imageVariance(digitImageData.data);
+    const inkStats = digitInkStats(digitImageData.data);
 
     let count = 0;
     let method: RuneRead["method"] = "empty";
     let confidence = 0.82;
     let note: string | undefined;
 
-    if (digitStats.brightRatio > 0.012 || digitStats.deviation > 22) {
+    if (inkStats.brightRatio > 0.018 && (digitStats.deviation > 16 || inkStats.veryBrightRatio > 0.004)) {
       try {
         const digitCanvas = makeDigitCanvas(context, digitCrop.x, digitCrop.y, digitCrop.width, digitCrop.height);
         count = await readDigits(digitCanvas);
@@ -213,17 +386,13 @@ export async function analyzeRuneTab(imageSrc: string, onProgress?: ProgressCall
         count = 0;
       }
 
-      if (count > 0) {
+      if (count > 0 && count <= 999) {
         method = "ocr";
-        confidence = Math.min(0.98, 0.68 + digitStats.brightRatio * 5 + digitStats.deviation / 120);
+        confidence = Math.min(0.98, 0.72 + inkStats.brightRatio * 4 + digitStats.deviation / 140);
+      } else {
+        count = 0;
+        note = "Possible count mark detected, but no digit could be read.";
       }
-    }
-
-    if (count === 0 && visualScore > 1.05) {
-      count = 1;
-      method = "visual";
-      confidence = Math.min(0.74, 0.48 + visualScore / 5);
-      note = "No readable stack number; treating visible rune art as one.";
     }
 
     reads.push({

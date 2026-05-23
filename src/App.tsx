@@ -1,6 +1,6 @@
 import { Camera, Check, ExternalLink, ImageUp, Minus, Plus, RefreshCcw, ScanLine } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { analyzeRuneTab, type RuneRead } from "./lib/vision";
+import { RUNE_GRID_COLUMNS, RUNE_GRID_ROWS, RUNE_SLOT_LAYOUT, analyzeRuneTab, type RuneRead } from "./lib/vision";
 import {
   RUNE_NAMES,
   emptyRuneCounts,
@@ -11,6 +11,8 @@ import {
 } from "./lib/runewords";
 
 type View = "capture" | "processing" | "results";
+
+const activeSlotKeys = new Set(RUNE_SLOT_LAYOUT.map(({ column, row }) => `${column}:${row}`));
 
 const secureCameraAvailable = () =>
   Boolean(navigator.mediaDevices?.getUserMedia) && (window.isSecureContext || location.hostname === "localhost");
@@ -166,9 +168,12 @@ function App() {
             <video ref={videoRef} className="camera-video" playsInline muted />
             {!cameraReady && <div className="camera-placeholder">{cameraIssue || "Camera"}</div>}
             <div className="stash-grid" aria-hidden="true">
-              {Array.from({ length: 36 }).map((_, index) => (
-                <span key={index} className={index > 32 ? "inactive" : ""} />
-              ))}
+              {Array.from({ length: RUNE_GRID_COLUMNS * RUNE_GRID_ROWS }).map((_, index) => {
+                const column = index % RUNE_GRID_COLUMNS;
+                const row = Math.floor(index / RUNE_GRID_COLUMNS);
+                const active = activeSlotKeys.has(`${column}:${row}`);
+                return <span key={index} className={active ? "active" : "inactive"} />;
+              })}
             </div>
             <div className="corner top-left" />
             <div className="corner top-right" />

@@ -97,8 +97,8 @@ h1 {
   position: relative;
   overflow: hidden;
   width: 100%;
-  aspect-ratio: 9 / 4;
-  min-height: 210px;
+  aspect-ratio: 9 / 5;
+  min-height: 250px;
   border: 1px solid rgba(243, 236, 225, 0.16);
   border-radius: 8px;
   background: #0c0b0a;
@@ -129,11 +129,10 @@ h1 {
 
 .stash-grid {
   position: absolute;
-  inset: 9%;
+  inset: 6%;
   display: grid;
   grid-template-columns: repeat(9, 1fr);
-  grid-template-rows: repeat(4, 1fr);
-  border: 1px solid rgba(224, 201, 144, 0.72);
+  grid-template-rows: repeat(5, 1fr);
   pointer-events: none;
 }
 
@@ -143,7 +142,13 @@ h1 {
 }
 
 .stash-grid .inactive {
-  background: rgba(0, 0, 0, 0.38);
+  border-color: rgba(224, 201, 144, 0.08);
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.stash-grid .active {
+  outline: 1px solid rgba(224, 201, 144, 0.4);
+  outline-offset: -3px;
 }
 
 .corner {
@@ -213,7 +218,7 @@ h1 {
 
 .scan-preview {
   overflow: hidden;
-  aspect-ratio: 9 / 4;
+  aspect-ratio: 9 / 5;
   border-radius: 8px;
   opacity: 0.44;
 }

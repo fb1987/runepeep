@@ -4,10 +4,10 @@ Rune Peep is a mobile-first Diablo II: Resurrected companion that reads a rune s
 
 ## Current Flow
 
-- Align the dedicated rune tab to the 9 x 4 grid.
+- Align the dedicated rune tab to the 9 x 5 grid.
 - Tap `Peep`, or use `Photo` on local HTTP/mobile browsers.
-- Rune identity is fixed by slot order from El through Zod.
-- Browser OCR reads stack counts from each cell.
+- Rune identity is fixed by the tab's real slot layout from El through Zod, including the unused high-rune holes.
+- Browser image processing finds the rune slot lattice, then OCR reads stack counts from the bottom-right number area only.
 - Low-confidence reads can be corrected with the rune count steppers.
 - Results show runeword name, rune recipe, compatible item types, craft count, and a details link.
 
