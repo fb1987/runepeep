@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: rune-peep
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm run preview -- --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: NODE_VERSION
+        value: 22
